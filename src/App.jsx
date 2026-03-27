@@ -82,8 +82,6 @@ export default function App() {
             ))}
           </div>
 
-      
-
           <button type="button" onClick={() => setMenuOpen((p) => !p)} className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 text-slate-700 transition duration-200 hover:border-slate-300 hover:bg-slate-50 md:hidden" aria-label="Toggle navigation" aria-expanded={menuOpen}>
             {menuOpen ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 6L18 18M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
@@ -143,6 +141,17 @@ export default function App() {
           } />
           <Route path="/patient" element={<PatientSupportForm />} />
           <Route path="/volunteer" element={<VolunteerRegistrationForm />} />
+          
+          {/* Catch-all route for unknown paths */}
+          <Route path="*" element={
+            <div className="flex min-h-[50vh] flex-col items-center justify-center text-center px-4">
+              <h2 className="text-4xl font-bold text-slate-900">404</h2>
+              <p className="mt-2 text-lg text-slate-600">Oops! The page you're looking for doesn't exist.</p>
+              <button onClick={() => navigateTo("/")} className="mt-6 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700">
+                Go back home
+              </button>
+            </div>
+          } />
         </Routes>
       </main>
 

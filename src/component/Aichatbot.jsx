@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const GEMINI_API_URL = "/api/gemini";
+const SAMBANOVA_API_KEY =
+  import.meta.env.VITE_SAMBANOVA_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
+const SAMBANOVA_MODEL =
+  import.meta.env.VITE_SAMBANOVA_MODEL || "gpt-oss-120b";
+const SAMBANOVA_API_URL = "https://api.sambanova.ai/v1/chat/completions";
 
 const SUGGESTIONS = [
   "How to register as volunteer?",
@@ -45,45 +49,85 @@ const createAppError = (code, message, extras = {}) => Object.assign(new Error(m
 
 async function sendMessageToGemini(userMessage, history = []) {
   if (!userMessage?.trim()) throw createAppError("BAD_REQUEST", "Empty message.");
+  if (!SAMBANOVA_API_KEY) {
+    throw createAppError(
+      "SERVER_CONFIG_ERROR",
+      "Missing VITE_SAMBANOVA_API_KEY."
+    );
+  }
 
-  const trimmed = history.slice(-(MAX_HISTORY * 2));
+  const messages = [
+    { role: "system", content: SYSTEM_PROMPT },
+    ...history
+      .slice(-(MAX_HISTORY * 2))
+      .filter(
+        (message) =>
+          message &&
+          typeof message.text === "string" &&
+          message.text.trim() &&
+          (message.role === "user" || message.role === "bot")
+      )
+      .map((message) => ({
+        role: message.role === "bot" ? "assistant" : "user",
+        content: message.text.trim(),
+      })),
+    { role: "user", content: userMessage.trim() },
+  ];
 
   try {
-    const response = await fetch(GEMINI_API_URL, {
+    const response = await fetch(SAMBANOVA_API_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${SAMBANOVA_API_KEY}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
-        userMessage: userMessage.trim(),
-        history: trimmed,
+        stream: false,
+        model: SAMBANOVA_MODEL,
+        messages,
       }),
     });
 
-    const data = await response.json().catch(() => ({}));
+    const raw = await response.text();
+    const data = raw ? JSON.parse(raw) : {};
 
     if (!response.ok) {
-      const code =
-        data?.code ||
-        (response.status >= 502 && response.status <= 504
-          ? "SERVER_UNAVAILABLE"
-          : `API_${response.status}`);
+      const message =
+        data?.error?.message ||
+        data?.message ||
+        raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() ||
+        `Request failed with status ${response.status}`;
+      const code = /quota|limit/i.test(message)
+        ? "QUOTA_UNAVAILABLE"
+        : response.status === 429
+          ? "RATE_LIMIT"
+          : response.status === 400
+            ? "BAD_REQUEST"
+            : response.status === 401 || response.status === 403
+              ? "AUTH_ERROR"
+              : response.status >= 500
+                ? "SERVER_UNAVAILABLE"
+                : `API_${response.status}`;
       throw createAppError(
         code,
-        data?.message ||
-          (code === "SERVER_UNAVAILABLE"
-            ? "HealthBot server is not reachable."
-            : `Request failed with status ${response.status}`),
-        { retryAfterSeconds: data?.retryAfterSeconds ?? null }
+        message,
+        { retryAfterSeconds: null }
       );
     }
 
-    if (!data?.reply) {
-      throw createAppError("EMPTY_RESPONSE", "Empty response from server.");
+    const reply = data?.choices?.[0]?.message?.content?.trim();
+
+    if (!reply) {
+      throw createAppError("EMPTY_RESPONSE", "Empty response from SambaNova.");
     }
 
-    return data.reply;
+    return reply;
   } catch (error) {
     if (error?.code) throw error;
-    throw createAppError("SERVER_UNAVAILABLE", "HealthBot server is not reachable.");
+    throw createAppError(
+      "SERVER_UNAVAILABLE",
+      "SambaNova is not reachable right now."
+    );
   }
 }
 
@@ -275,8 +319,8 @@ export default function HealthBot() {
         AUTH_ERROR:          "⚠️ SambaNova authentication failed. Check the server-side API key.",
         BAD_REQUEST:         "⚠️ Request error. Please rephrase and try again.",
         TEMP_UNAVAILABLE:    "⚠️ SambaNova is temporarily busy. Please try again in a moment.",
-        SERVER_CONFIG_ERROR: "⚠️ The chatbot server is missing its SambaNova API key.",
-        SERVER_UNAVAILABLE:  "⚠️ The chatbot backend is not running. Start the server and try again.",
+        SERVER_CONFIG_ERROR: "⚠️ Missing VITE_SAMBANOVA_API_KEY in the frontend environment.",
+        SERVER_UNAVAILABLE:  "⚠️ SambaNova is not reachable right now. Please try again in a moment.",
       };
       const handledErrorMap = {
         RATE_LIMIT:          err.retryAfterSeconds ? `Please wait about ${err.retryAfterSeconds} seconds, then tap Retry.` : "Please wait a moment, then tap Retry.",
@@ -284,8 +328,8 @@ export default function HealthBot() {
         AUTH_ERROR:          "Server authentication with SambaNova failed.",
         BAD_REQUEST:         "Please rephrase your message and try again.",
         TEMP_UNAVAILABLE:    "SambaNova is temporarily busy.",
-        SERVER_CONFIG_ERROR: "The backend server is missing its SambaNova API key.",
-        SERVER_UNAVAILABLE:  "Backend server is not running.",
+        SERVER_CONFIG_ERROR: "VITE_SAMBANOVA_API_KEY is missing.",
+        SERVER_UNAVAILABLE:  "SambaNova is not reachable right now.",
       };
       const handledMsg =
         handledMsgMap[code] ?? "⚠️ Something went wrong. Please try again or call **1800-000-0000**.";
